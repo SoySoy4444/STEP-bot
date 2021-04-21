@@ -62,7 +62,7 @@ class Step(commands.Cog):
             if time.time() - start_time > 300:
                 i += 1
 
-        for l in self.current[:i]:
+        for listener in self.current[:i]:
             await listener.k.clear_reactions()
         self.current = self.current[i:]
 
@@ -169,7 +169,7 @@ class Step(commands.Cog):
                 if f"{year} {paper} {question}" in a[0]: #if user has already completed the paper
                     if (1987 <= _year <= 2018 and int(paper) in [1, 2, 3]) or (_year >= 2019 and int(paper) in [2, 3]): #STEP 1 has been discontinued from 2019
                         cur.execute("UPDATE members SET completed = %s WHERE id = %s", (a[0].replace(f"{year} {paper} {question}",""), ctx.author.id))
-                        await ctx.send(f"{_year} S{paper} Q{question} has been marked as uncomplete for {ctx.author.name}.")        
+                        await ctx.send(f"{_year} S{paper} Q{question} has been marked as incomplete for {ctx.author.name}.")        
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction, user):
