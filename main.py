@@ -18,6 +18,8 @@ DB_PASS = os.getenv('DB_PASS')
 
 conn = psycopg2.connect(host=DB_HOST, database=DB_NAME, user=DB_USER, password=DB_PASS)
 
+LATEST_YEAR = 2018
+
 with conn:
     with conn.cursor() as cur:
         cur.execute('''
@@ -53,8 +55,6 @@ class Listener:
         return "{}\n{}\n{}\n{}\n{}\n{}".format(self.k, self.author, self.edit_message, self.message, self.question, self.time)
 
 def process_input(question): #Union[str, Tuple[str]] -> Union[List[str], False]
-    max_year = 18 #latest year on STEP database is 2018 as of 04/22/2021
-
     if len(question) == 1:
         question = question[0]
     if isinstance(question, str):
@@ -68,24 +68,38 @@ def process_input(question): #Union[str, Tuple[str]] -> Union[List[str], False]
 
     #alternatively, could use Python 3.9's str.removeprefix() method to remove S/s and Q/q specifically
     # e.g. paper = paper.removeprefix("S")
-    paper = re.sub("[^0-9]", "", paper) #substitute all non-numerals with empty string
-    q = re.sub("[^0-9]", "", q)
+    paper = re.sub("[^0-9]", "", paper) #substitute all non-numerals with empty string e.g. get rid of S in S3
+    q = re.sub("[^0-9]", "", q) #get rid of Q in Q14
 
     try:
-        _year = int(year)
-        if 0 <= _year <= max_year: #years 2000-max_year
-            _year += 2000
-        elif 87 <= _year <= 99: #years 1987 - 1999
-            _year += 1900
+        paper = int(paper)
+        q = int(q)
 
-        #STEP 1 has been discontinued from 2019
-        if not (1987 <= _year <= 2018 and int(paper) in [1, 2, 3]) or (2019 <= _year <= max_year and int(paper) in [2, 3]):
-            print("Not valid paper")
-            return False
+        if year.lower() == "spec":
+            if 1 <= paper <= 3 and 1 <= q <= 16:
+                return ["Spec", paper, q]
+            else:
+                return False
+        else:
+            year = int(year) #year might raise error value if non numerical entered
+
+            # if user entered shorthand year (e.g. 01 instead of 2001), then fix:
+            max_year = int(str(LATEST_YEAR)[-2:]) #latest year on STEP database is 2018 as of 04/22/2021
+            if 0 <= year <= max_year: #years 20000-max_year e.g. 00-18
+                year += 2000
+            elif 87 <= year <= 99: #years 1987 - 1999
+                year += 1900
+
+            #STEP 1 has been discontinued from 2019
+            if not ((1987 <= year <= 2018 and 1 <= paper <= 3) or (2019 <= year <= LATEST_YEAR and 2 <= paper <= 3)): #valid year and paper?
+                return False
+            elif (year >= 2008 and q > 13) or (year >= 1994 and q > 14) or (year <= 1993 and q > 16): #valid question?
+                return False
+
     except ValueError:
         return False
 
-    return list(map(str, [_year, paper, q]))
+    return list(map(str, [year, paper, q]))
 
 class Step(commands.Cog):
     def __init__(self, bot):
@@ -112,13 +126,16 @@ class Step(commands.Cog):
 
     @commands.command()
     async def s(self, ctx, *args):
-        # year, paper, question = process_input(args)
         if k := process_input(args):
             year, paper, question = k
         else:
             return await ctx.channel.send("Invalid arguments")
-        _year = year[-2:] #last two digits of the year e.g. 01 from 2001
-        url = f"https://stepdatabase.maths.org/database/db/{_year}/{_year}-S{paper}-Q{question}.png"
+
+        if year == "Spec":
+            url = f"https://stepdatabase.maths.org/database/db/Spec/Spec-S{paper}-Q{question}.png"
+        else:
+            _year = year[-2:] #last two digits of the year e.g. 01 from 2001
+            url = f"https://stepdatabase.maths.org/database/db/{_year}/{_year}-S{paper}-Q{question}.png"
 
         embed=discord.Embed(title="", description=f"Checking for {ctx.author}", color=0x00484F)
         embed.add_field(name="Year", value=year, inline=True)
@@ -172,7 +189,7 @@ class Step(commands.Cog):
                 a = cur.fetchone()
 
                 if f"{year} {paper} {question}" not in a[0]: #if user has not already completed the paper
-                    cur.execute("UPDATE members SET completed = %s WHERE id = %s", (a[0]+f"{year} {paper} {question}", ctx.author.id))
+                    cur.execute("UPDATE members SET completed = %s WHERE id = %s", (a[0]+f"({year} {paper} {question})", ctx.author.id))
                     await ctx.send(f"{year} S{paper} Q{question} has been marked as complete for {ctx.author.name}.")
                 else:
                     await ctx.send(f"{year} S{paper} Q{question} is already complete for {ctx.author.name}.")
@@ -190,10 +207,32 @@ class Step(commands.Cog):
                 a = cur.fetchone()
 
                 if f"{year} {paper} {question}" in a[0]: #if user has already completed the paper
-                    cur.execute("UPDATE members SET completed = %s WHERE id = %s", (a[0].replace(f"{year} {paper} {question}",""), ctx.author.id))
+                    cur.execute("UPDATE members SET completed = %s WHERE id = %s", (a[0].replace(f"({year} {paper} {question})",""), ctx.author.id))
                     await ctx.send(f"{year} S{paper} Q{question} has been marked as incomplete for {ctx.author.name}.")
                 else:
                     await ctx.send(f"{year} S{paper} Q{question} is already incomplete for {ctx.author.name}.")
+
+    @commands.command(alises=["show", "a"])
+    async def show(self, ctx, *args):
+        with conn: #automatically conn.commit()
+            with conn.cursor() as cur: #automatically cur.close()
+                cur.execute("SELECT completed FROM members WHERE id = %s", (ctx.author.id,))
+                completed_str = cur.fetchone()[0]
+        #e.g. ['(1999 2 5', '2004 3 1', '2001 3 2', '2009 1 12)'] - list of strings, first and last item contains ( )
+        temp = completed_str[0:].split(")(")
+        #remove ( and ), then for each string, split it by space then make it a tuple
+        temp = [tuple(s.replace(")", "").replace("(", "").split()) for s in temp]
+        #convert from list of tuples of string to list of tuples of integers
+        res = [tuple(map(int, s)) for s in temp if s[0] != "Spec"]
+        #sort by first (year), second (paper), third (question)
+        res = sorted(res)
+
+        spec = [("Spec", int(s[1]), int(s[2])) for s in temp if s[0] == "Spec"]
+        sorted_spec = sorted(spec, key=lambda x: (x[1], x[2])) #sort by x[1] (paper) then x[2] (question)
+
+        res += sorted_spec
+
+        await ctx.send(res)
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction, user):
