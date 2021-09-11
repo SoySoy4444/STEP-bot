@@ -8,6 +8,7 @@ from io import BytesIO
 import psycopg2
 import time, asyncio
 import re
+import random
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -212,7 +213,7 @@ class Step(commands.Cog):
                 else:
                     await ctx.send(f"{year} S{paper} Q{question} is already incomplete for {ctx.author.name}.")
 
-    @commands.command(alises=["show", "a"])
+    @commands.command(aliases=["a"])
     async def show(self, ctx, *args):
         with conn: #automatically conn.commit()
             with conn.cursor() as cur: #automatically cur.close()
@@ -233,6 +234,27 @@ class Step(commands.Cog):
         res += sorted_spec
 
         await ctx.send(res)
+
+    @commands.command(aliases=["r"])
+    async def random(self, ctx):
+        years = list(range(1987, LATEST_YEAR+1))
+        years.append("Spec")
+        random_year = random.choice(years)
+
+        if random_year == "Spec":
+            random_paper = random.randint(1, 3)
+            random_question = random.randint(1, 16)
+        else:
+            random_paper = random.randint(1, 3) if random_year <= 2018 else random.randint(2, 3) #STEP 1 discontinued from 2019
+
+            if random_year >= 2008: #from 2008-2018, there were 13 questions per paper
+                random_question = random.randint(1, 13)
+            elif random_year >= 1994: #from 1994-2007, there were 14 questions per paper
+                random_question = random.randint(1, 14)
+            else: #from 1984-1993, there were 16 questions per paper
+                random_question = random.randint(1, 16)
+
+        await ctx.invoke(self.bot.get_command('s'), str(random_year), str(random_paper), str(random_question))
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction, user):
