@@ -30,7 +30,8 @@ with conn:
                 "username" VARCHAR(100)
             )''')
 
-bot = commands.Bot(command_prefix='!')
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix='!', intents=intents)
 
 class ReactionContext:
     def __init__(self, author, channel):
@@ -278,5 +279,8 @@ class Step(commands.Cog):
                         new_content = listener.edit_message.content.replace("❌", "✅")
                         await listener.edit_message.edit(content=new_content)
 
-bot.add_cog(Step(bot))
-bot.run(TOKEN)
+async def setup():
+    await bot.add_cog(Step(bot))
+    await bot.start(TOKEN)
+
+asyncio.run(setup())
